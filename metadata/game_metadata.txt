@@ -1,0 +1,6 @@
+devid=CANICVS
+devtitle=CANICVS
+#gameid=mygame
+gametitle=Dragon Solitaire
+version=0.1
+icon=metadata/icon.png
