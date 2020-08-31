@@ -1,1 +1,1 @@
-dragonruby.exe
+dragonruby.exe DragonSolitaire
