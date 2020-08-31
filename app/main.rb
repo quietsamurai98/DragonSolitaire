@@ -1,4 +1,10 @@
-# $gtk.define_singleton_method(:production) { true } #shhhhhhh
+# Constants used for debugging
+$FLOWER_POWER = true # Every card can be dropped into the flower card slot. If you're looking for a cheat code, here it is.
+SHUFFLE = false # Shuffle the deck. You can't win if you don't shuffle. Used to debug dragon buttons.
+ONLY_DRAGONS = true # Skip numbered cards
+TRACE_ENABLED = true # Enable tracing. SUPER SLOW!
+PRODUCTION = false # Enable production mode
+MIN_LOG_LEVEL = :trace # Minimum log level for clog. Trace *kills* framerate if running on HDD.
 
 COLORS = {
     red: {r: 217, g: 95, b: 2},
@@ -15,8 +21,6 @@ LOG_LEVELS = {
     err: {str: "[ERROR] ", level: 4},
     fatal: {str: "[FATAL] ", level: 5},
 }
-MIN_LOG_LEVEL = LOG_LEVELS[:debug]
-
 
 # @param [String, #to_s] msg The message to log
 # @param [Symbol, nil] level The level at which to log msg
@@ -26,42 +30,22 @@ def clog(msg, level = nil, line = '???')
   start_time = Time.now
   level ||= :info
   level = LOG_LEVELS[level]
-  if MIN_LOG_LEVEL[:level] <= level[:level]
+  if LOG_LEVELS[MIN_LOG_LEVEL][:level] <= level[:level]
     puts "#{level[:str]}[L\##{line}]  #{msg}"
   end
   Time.now - start_time
 end
 
 # Name is misleading. Only allows a foreground colored mask sprite and a background sprite.
+#noinspection RubyResolve
 class AbstractMultiSprite
   attr_accessor :background
   attr_sprite
-
-end
-
-class ButtonMultiSprite < AbstractMultiSprite
-  attr_accessor :background
-  attr_sprite
-
-  def initialize(params = {})
-    @x = params[:x] || 0
-    @y = params[:y] || 0
-    @w = 48
-    @h = 48
-    @path = nil
-    @background = {x: x, y: y, w: @w, h: @h, path: "sprites/button_bg_dim.png"}
-  end
 
   def set_color(color)
     @r = color[:r]
     @g = color[:g]
     @b = color[:b]
-  end
-
-  def set_img(suit, state)
-    @path = "sprites/button_icon_#{suit.to_s}.png"
-    @background.path = "sprites/button_bg_#{state.to_s}.png"
-    set_color(COLORS[suit])
   end
 
   def set_pos(params = {})
@@ -80,6 +64,42 @@ class ButtonMultiSprite < AbstractMultiSprite
   end
 end
 
+class ButtonMultiSprite < AbstractMultiSprite
+
+  def initialize(params = {})
+    @x = params[:x] || 0
+    @y = params[:y] || 0
+    @w = 48
+    @h = 48
+    @path = nil
+    @background = {x: x, y: y, w: @w, h: @h, path: "sprites/button_bg_dim.png"}
+  end
+
+  def set_img(suit, state)
+    @path = "sprites/button_icon_#{suit.to_s}.png"
+    @background[:path] = "sprites/button_bg_#{state.to_s}.png"
+    set_color(COLORS[suit])
+  end
+
+  def set_color(color)
+    super
+  end
+
+  def set_pos(params = nil)
+    super
+  end
+
+  def list
+    super
+  end
+
+  def center
+    super
+  end
+
+end
+
+#noinspection RubyResolve
 class Button
   attr_accessor :suit, :state, :x, :y, :z, :id
 
@@ -141,6 +161,7 @@ class Button
   end
 end
 
+#noinspection RubyResolve
 class CardMultiSprite
   attr_accessor :background
   attr_sprite
@@ -161,16 +182,17 @@ class CardMultiSprite
   end
 
   def set_img(suit, value)
-    if value == 0 or suit == :misc
+    if value == 0 || suit == :misc
       #Card has a special sprite
-      if suit == :misc and value == 0
+      if suit == :misc && value == 0
         set_color(COLORS[:white])
         @path = "sprites/card_flower.png"
-      else
-        if suit != :misc
-          set_color(COLORS[suit])
-          @path = "sprites/card_dragon_#{suit.to_s}.png"
-        end
+      elsif suit == :misc && value == 1
+        set_color(COLORS[:white])
+        @path = "sprites/card_back.png"
+      elsif suit != :misc
+        set_color(COLORS[suit])
+        @path = "sprites/card_dragon_#{suit.to_s}.png"
       end
     else
       #Card has a numbered sprite
@@ -195,6 +217,7 @@ class CardMultiSprite
   end
 end
 
+#noinspection RubyResolve
 class Card
   attr_accessor :suit, :value, :x, :y, :z, :id, :rank, :file
 
@@ -255,7 +278,7 @@ class Card
     x2 = @x + @sprite.w
     y1 = @y
     y2 = @y + @sprite.h
-    x1 < x and x < x2 and y1 < y and y < y2
+    x1 < x && x < x2 && y1 < y && y < y2
   end
 
 
@@ -273,19 +296,27 @@ class Card
   end
 end
 
+#noinspection RubyResolve
 class StableState
-  attr_accessor :holding_cards, :mouse_down_pos, :held_cards, :entities, :buttons, :cards
+  attr_accessor :holding_cards, :mouse_down_pos, :entities, :buttons, :cards, :held_cards, :gtk_state, :auto_move_cooldown
 
-  def initialize
+  # @param [OpenEntity] gtk_state The actual state of the game engine
+  def initialize(gtk_state)
+    if TRACE_ENABLED
+      trace!
+    end
+    @auto_move_cooldown = 0
+    @get_state = gtk_state
     $gtk.set_window_title "Dragon Solitaire"
-    #@type [Boolean]
+    #@type Boolean
     @holding_cards = false
-    #@type [Hash]
-    @mouse_down_pos = nil
-    #@type [Array<Card>]
-    @held_cards = nil
-    #@type [Array<Entity>]
+    #@type Hash
+    @mouse_down_pos = {x: 0, y: 0}
+    #@type Array<Card>
+    @held_cards = []
+    #@type Array<Entity>
     @entities = []
+    #@type Array<Button>
     @buttons = [
         Button.new({suit: :red, state: :dim, x: 536, y: 647}),
         Button.new({suit: :green, state: :dim, x: 536, y: 590}),
@@ -294,7 +325,10 @@ class StableState
     @entities += @buttons
     @cards = []
     # The next line generates an array of {s: suit, v: value} hashes that represents all cards in the deck.
-    card_data = ((%i{red green blue}).flat_map { |s| ((1..9).to_a + [0, 0, 0, 0]).map { |v| {s: s, v: v} } } << {s: :misc, v: 0})
+    card_data = ((%i{red green blue}).flat_map { |s| ((1..(ONLY_DRAGONS ? 0 : 9)).to_a + [0, 0, 0, 0]).map { |v| {s: s, v: v} } } << {s: :misc, v: 0})
+    if SHUFFLE
+      card_data = card_data.shuffle
+    end
     # Dragon cards omitted for debugging
     # card_data = ((%i{red green blue}).flat_map { |s| ((0..9).to_a).map { |v| {s: s, v: v} } } << {s: :misc, v: 0} << {s: :misc, v: 0}).shuffle
     card_data.each_with_index { |card_datum, idx|
@@ -306,27 +340,58 @@ class StableState
                           z: idx,
                           id: idx
                       })
-      #clog "#{card.suit.to_s}_#{card.value.to_s} at rank #{card.rank} and file #{card.file}", :trace, __LINE__
+      clog("#{card.suit.to_s}_#{card.value.to_s} at rank #{card.rank} and file #{card.file}", :trace, __LINE__)
       card.set_pos(card.calculate_snap_position)
       @cards << card
     }
     @entities += @cards
-    light_buttons
   end
+
+  def serialize
+    {holding_cards: holding_cards, mouse_down_pos: mouse_down_pos,held_cards: held_cards, cards: cards, buttons: buttons}
+  end
+
+  def inspect
+    serialize.to_s
+  end
+
+  def to_s
+    serialize.to_s
+  end
+
+
 end
 
+#noinspection RubyResolve
 class Game
   attr_gtk
-  attr_reader :stable_state
 
-  def initialize
-    @stable_state = StableState.new
+  # @return [StableState]
+  def stable_state
+    state.stable_state
   end
 
-  # Reset the game
+  def stable_state= (val)
+    state.stable_state = val
+  end
+
+  def initialize(args = nil)
+    args ||= @args # This is a terrible hack that allows for the class to re-initialize itself.
+    if TRACE_ENABLED
+      trace!
+    end
+    @args = args
+    self.stable_state = StableState.new args
+    light_buttons
+  end
+
+  def tick_count
+    state.tick_count
+  end
 
   # Render everything
   def render
+    outputs.background_color = [1, 55, 30]
     outputs.sprites << [0, 0, 1280, 720, "sprites/background.png"]
     outputs.sprites << stable_state.entities.sort_by { |ent| ent.z }.map { |ent| ent.sprite.list }
   end
@@ -345,17 +410,17 @@ class Game
     # @type [Array<Card>]
     cards = stable_state.cards
     if base_card.rank == -1
-      if base_card.file > 2 or (base_card.suit == :misc and base_card.value != 0)
+      if base_card.file > 2 || (base_card.suit == :misc && base_card.value != 0)
         return []
       else
         return [base_card]
       end
     end
-    grabbed_cards = [base_card] + cards.find_all { |card| card.file == base_card.file and card.rank > base_card.rank }.sort_by { |card| card.rank }
+    grabbed_cards = [base_card] + cards.find_all { |card| card.file == base_card.file && card.rank > base_card.rank }.sort_by { |card| card.rank }
     valid = true
     (0..grabbed_cards.length - 2).each { |idx|
-      clog "#{grabbed_cards[idx].suit.to_s[0]}#{grabbed_cards[idx].value}", :debug, __LINE__
-      valid &= ((grabbed_cards[idx].value == (grabbed_cards[idx + 1].value + 1)) and (grabbed_cards[idx].suit != grabbed_cards[idx + 1].suit))
+      clog("#{grabbed_cards[idx].suit.to_s[0]}#{grabbed_cards[idx].value}", :debug, __LINE__)
+      valid &= ((grabbed_cards[idx].value == (grabbed_cards[idx + 1].value + 1)) && (grabbed_cards[idx].suit != grabbed_cards[idx + 1].suit))
     }
     unless valid
       return []
@@ -365,13 +430,30 @@ class Game
 
   # Pick up a partial file of cards
   def grab_cards(base_card)
-    # clog "#{base_card.suit.to_s}_#{base_card.value.to_s} clicked", :trace, __LINE__
     grab_list = list_cards_to_grab(base_card)
     if grab_list.length != 0
       stable_state.mouse_down_pos = {x: inputs.mouse.down.x, y: inputs.mouse.down.y}
       stable_state.held_cards = grab_list
-      stable_state.held_cards.each { |held_card| held_card.z += stable_state.tick_count }
+      stable_state.held_cards.each { |held_card| held_card.z += tick_count }
       stable_state.holding_cards = true
+    end
+  end
+
+  # @param [Button] btn
+  def dragon_button_pressed(btn)
+    if btn.state == :on
+      file = get_bank_file_for_dragon(btn.suit, true)
+      cards_in_play(true).find_all { |card| card.suit == btn.suit && card.value == 0 }.each do |card|
+        #@type [Card]
+        card = card
+        card.rank = -1
+        card.file = file
+        card.suit = :misc
+        card.value = 1
+        card.set_pos(card.calculate_snap_position)
+      end
+      dim_buttons
+      light_buttons
     end
   end
 
@@ -382,10 +464,12 @@ class Game
       clog('NIL CLICKED', :trace, __LINE__)
     else
       if stable_state.cards.include?(clicked_ent)
+        clog("CLICKED CARD #{clicked_ent.suit.to_s}_#{clicked_ent.value.to_s}", :trace, __LINE__)
         dim_buttons
         grab_cards(clicked_ent)
       elsif stable_state.buttons.include?(clicked_ent)
         clog("CLICKED #{clicked_ent.suit.to_s} BUTTON", :trace, __LINE__)
+        dragon_button_pressed(clicked_ent)
       end
     end
   end
@@ -417,12 +501,13 @@ class Game
   # @param [Integer] file
   # @return [Array<Card>]
   def cards_in_file(file)
-    stable_state.cards.find_all { |card| card.file == file and not ((stable_state.held_cards || []).include? card) }.sort_by { |card| card.rank }
+    stable_state.cards.find_all { |card| card.file == file && not((stable_state.held_cards || []).include? card) }.sort_by { |card| card.rank }
   end
 
+  # @param [Boolean] include_bank
   # @return [Array<Card>]
-  def cards_in_play
-    stable_state.cards.find_all { |card| card.rank != -1 }.sort_by { |card| card.rank }
+  def cards_in_play(include_bank = false)
+    stable_state.cards.find_all { |card| card.rank != -1 || (include_bank && card.file < 3) }.sort_by { |card| card.rank }
   end
 
   # @return [Array<Card>]
@@ -438,12 +523,12 @@ class Game
   end
 
   # @return [Array<Card>]
-  def cards_in_bank
+  def cards_in_bank(exclude_gathered_dragons = true)
     stable_state.cards.find_all { |card|
-      (card.rank == -1) and
-          (card.file < 3) and
-          (not (stable_state.held_cards || []).include? card) and
-          (not card.suit == :misc)
+      (card.rank == -1) &&
+          (card.file < 3) &&
+          (not (stable_state.held_cards || []).include? card) &&
+          ((card.suit != :misc) || not(exclude_gathered_dragons))
     }.sort_by { |card| card.file }
   end
 
@@ -454,97 +539,107 @@ class Game
     skip_dur = 0
 
     droppable = false
-    #@type [Array<Card>]
+    #@type Array<Card>
     held_cards = stable_state.held_cards
-    #@type [Card]
+    #@type Card
     base_card = held_cards[0]
-    base_rf = get_rank_file(base_card.sprite.center)
-    file = base_rf[:file]
-    if base_rf[:rank] == -1 and held_cards.length == 1 # Special top row
-      if file < 3 # Bank spaces
-        droppable = not(cards_in_file(file).any? { |card| card.rank == -1 })
-      elsif file == 4 # Flower space
-        droppable = (base_card.suit == :misc and base_card.value == 0) # Only one flower, no need to check if occupied
-      elsif file > 4 # Discard space
-        card = cards_in_file(file).find_all { |card| card.rank == -1 }.sort_by { |card| card.value }[-1]
-        droppable = card == nil ? base_card.value == 1 : ((base_card.value == (card.value + 1)) and (base_card.suit == card.suit))
+    if base_card != nil
+      base_rf = get_rank_file(base_card.sprite.center)
+      file = base_rf[:file]
+      if base_rf[:rank] == -1 && held_cards.length == 1 # Special top row
+        if file < 3 # Bank spaces
+          droppable = not(cards_in_file(file).any? { |card| card.rank == -1 })
+        elsif file == 4 # Flower space
+          droppable = $FLOWER_POWER || (base_card.suit == :misc && base_card.value == 0) # Only one flower, no need to check if occupied
+        elsif file > 4 # Discard space
+          card = cards_in_file(file).find_all { |card| card.rank == -1 }.sort_by { |card| card.value }[-1]
+          droppable = card == nil ? base_card.value == 1 : ((base_card.value == (card.value + 1)) && (base_card.suit == card.suit))
+        end
+        if droppable
+          base_rf[:rank] = -1
+        end
+      elsif (file == base_card.file) && ((base_rf[:rank] == -1) == (base_card.rank == -1))
+        droppable = false # This is misleading. You CAN drop cards back in their original file. In fact, that's exactly what happens when droppable is false.
+      elsif base_rf[:rank] >= 0 # Normal play area
+        file_card = cards_in_file(file).find_all { |card| card.rank >= 0 }[-1]
+        if file_card == nil
+          droppable = true
+          base_rf[:rank] = 0
+        else
+          droppable = ((file_card.suit != base_card.suit) && (file_card.value - 1 == base_card.value) && (base_card.value > 0))
+          base_rf[:rank] = file_card.rank + 1
+        end
       end
-      if droppable
-        base_rf[:rank] = -1
+      unless droppable
+        base_rf = {rank: base_card.rank, file: base_card.file}
       end
-    elsif (file == base_card.file) and ((base_rf[:rank] == -1) == (base_card.rank == -1))
-      droppable = false # This is misleading. You CAN drop cards back in their original file. In fact, that's exactly what happens when droppable is false.
-    elsif base_rf[:rank] >= 0 # Normal play area
-      file_card = cards_in_file(file).find_all { |card| card.rank >= 0 }[-1]
-      if file_card == nil
-        droppable = true
-        base_rf[:rank] = 0
-      else
-        droppable = ((file_card.suit != base_card.suit) and (file_card.value - 1 == base_card.value) and (base_card.value > 0))
-        base_rf[:rank] = file_card.rank + 1
+      idx = 0
+      held_cards.each do |held_card|
+        # @type [Card]
+        card = held_card
+        card.rank = base_rf[:rank] + idx
+        idx += 1
+        card.file = base_rf[:file]
+        card.set_pos(card.calculate_snap_position)
       end
+    else
+      clog("UNEXPECTED STATE: Somehow, the player has grabbed zero cards.", :err, __LINE__)
     end
-    unless droppable
-      base_rf = {rank: base_card.rank, file: base_card.file}
-    end
-    idx = 0
-    held_cards.each do |held_card|
-      # @type [Card]
-      card = held_card
-      card.rank = base_rf[:rank] + idx
-      idx += 1
-      card.file = base_rf[:file]
-      card.set_pos(card.calculate_snap_position)
-    end
-    stable_state.mouse_down_pos = nil
-    stable_state.held_cards = nil
-    stable_state.mouse_down_pos = nil
+    stable_state.held_cards = []
+    stable_state.holding_cards = false
 
     end_time = Time.now
-    clog "Card dropping took #{end_time - start_time - skip_dur} seconds!", :debug, __LINE__
-    clog "Logging took #{skip_dur} seconds!", :debug, __LINE__
+    clog("Card dropping took #{end_time - start_time - skip_dur} seconds!", :debug, __LINE__)
+    clog("Logging took #{skip_dur} seconds!", :debug, __LINE__)
   end
 
   def dim_buttons
     stable_state.buttons.each { |btn|
-      btn.state == :dim if btn.state == :on
+      if btn.state == :on
+        btn.state = :dim
+      end
     }
   end
 
   # @return [Integer, nil]
   def get_bank_file_for_dragon(suit)
-    #@type [Array<Card>]
-    bank_cards = cards_in_bank
+    #@type Array<Card>
+    bank_cards = cards_in_bank(gathering_dragons)
     if bank_cards.length == 3
-      tmp = bank_cards.first { |card| card.suit == suit and card.value == 0 }
-      tmp = tmp.file if tmp != nil
-      tmp
+      tmp = bank_cards.find { |card| (card.suit == suit && card.value == 0) }
+      if tmp != nil
+        return tmp.file
+      else
+        return nil
+      end
     elsif bank_cards.length == 0
       return 0
     else
-      (0..2).first { |file| bank_cards.none? { |card| card.file == file } }
+      (0..2).find { |file| cards_in_bank(false).find { |card| card.file != file } }
     end
   end
 
   def light_buttons
     start_time = Time.now
     skip_dur = 0
-    stable_state.buttons.find_all { |button|
-      skip_dur += clog "Testing #{button.suit} button...", :trace, __LINE__
-      #@type [Button]
+    stable_state.buttons.find_all do |button|
+      skip_dur += clog("Testing #{button.suit} button...", :trace, __LINE__)
+      #@type Button
       btn = button
-      dim_test = button.state != :off
-      bank_test = (dim_test and get_bank_file_for_dragon(btn.suit) != nil)
-      access_test = (bank_test and (4 == (cards_in_bank + cards_on_top).count { |card| (card.suit == btn.suit and card.value == 0) }))
-
-      (dim_test and bank_test and access_test)
-    }.each do |button|
+      dim_test = btn.state != :off
+      skip_dur += clog("dim_test: #{dim_test}", :trace, __LINE__)
+      bank_test = (dim_test && (get_bank_file_for_dragon(btn.suit) != nil))
+      skip_dur += clog("bank_test: #{bank_test}", :trace, __LINE__)
+      access_test = (bank_test && (4 == (cards_in_bank + cards_on_top).count { |card| ((card.suit == btn.suit) && (card.value == 0)) }))
+      skip_dur += clog("access_test: #{access_test}", :trace, __LINE__)
+      access_test
+    end.each do |button|
       button.state = :on
-      skip_dur += clog "Lighting #{button.suit} button", __LINE__
+      skip_dur += clog("Lighting #{button.suit} button", :trace, __LINE__)
     end
     end_time = Time.now
-    clog "Button lighting took #{end_time - start_time - skip_dur} seconds!", :debug, __LINE__
-    clog "Logging took #{skip_dur} seconds!", :debug, __LINE__
+    clog("Button lighting took #{end_time - start_time - skip_dur} seconds!", :debug, __LINE__)
+    clog("Logging took #{skip_dur} seconds!", :debug, __LINE__)
     nil
   end
 
@@ -552,33 +647,41 @@ class Game
   def process_input
     if inputs.mouse.down
       process_mouse_down
-    elsif stable_state.holding_cards and inputs.mouse.button_left
+    elsif stable_state.holding_cards && inputs.mouse.button_left
       drag_cards
-    elsif stable_state.holding_cards and inputs.mouse.up
+    elsif stable_state.holding_cards && inputs.mouse.up
       drop_cards
+      dim_buttons
       light_buttons
     end
     if inputs.keyboard.key_down.space
       # Reset the game
       $gtk.reset(seed: (Time.now.to_f * 100000).to_i)
-      init_state
+      initialize
     end
   end
 
   # @param [$gtk.args] args
-  def tick
-    init_state
+  def tick(args)
+    @args = args
     process_input
     render
   end
 end
 
-$game = Game.new
+if Kernel::global_tick_count == 0
+  $game = nil
+end
 
-def foo; end
-
+#noinspection RubyResolve,RubyNilAnalysis
 def tick(args)
-  trace! $game
-  $game.args = args
-  $game.tick
+  GTK::Trace.flush_trace(true) if Kernel.global_tick_count % 600 == 0
+  if Kernel::global_tick_count == 0
+    $game = Game.new args
+    if PRODUCTION
+      args.gtk.log_level = :off
+      $gtk.define_singleton_method(:production) { true } #shhhhhhh
+    end
+  end
+  $game.tick args
 end
