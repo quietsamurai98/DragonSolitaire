@@ -390,13 +390,16 @@ class Game
     state.stable_state = val
   end
 
-  def initialize(args = nil)
-    args ||= @args # This is a terrible hack that allows for the class to re-initialize itself.
+  def initialize(args)
+    @args = args
     if TRACE_ENABLED
       trace!
     end
-    @args = args
-    self.stable_state = StableState.new args
+    new_game
+  end
+
+  def new_game
+    self.stable_state = StableState.new(@args)
     light_buttons
   end
 
@@ -715,8 +718,8 @@ class Game
     end
     if inputs.keyboard.key_down.space
       # Reset the game
-      $gtk.reset(seed: (Time.now.to_f * 100000).to_i)
-      initialize
+      # $gtk.reset(seed: (Time.now.to_f * 100000).to_i)
+      new_game
     end
   end
 
@@ -743,7 +746,7 @@ def tick(args)
   if Kernel::global_tick_count == 0
     $game = Game.new args
     if PRODUCTION
-      args.gtk.log_level = :off
+      args.gtk.log_level = :warn
       $gtk.define_singleton_method(:production) { true } #shhhhhhh
     end
   end
