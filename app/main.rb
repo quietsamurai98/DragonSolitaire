@@ -4,7 +4,7 @@ SHUFFLE = false # Shuffle the deck. You can't win if you don't shuffle. Used to 
 ONLY_DRAGONS = true # Skip numbered cards
 TRACE_ENABLED = true # Enable tracing. SUPER SLOW!
 PRODUCTION = false # Enable production mode
-MIN_LOG_LEVEL = :trace # Minimum log level for clog. Trace *kills* framerate if running on HDD.
+MIN_LOG_LEVEL = :info # Minimum log level for clog. Trace *kills* framerate if running on HDD.
 
 COLORS = {
     red: {r: 217, g: 95, b: 2},
@@ -348,7 +348,7 @@ class StableState
   end
 
   def serialize
-    {holding_cards: holding_cards, mouse_down_pos: mouse_down_pos,held_cards: held_cards, cards: cards, buttons: buttons}
+    {holding_cards: holding_cards, mouse_down_pos: mouse_down_pos, held_cards: held_cards, cards: cards, buttons: buttons}
   end
 
   def inspect
@@ -442,7 +442,7 @@ class Game
   # @param [Button] btn
   def dragon_button_pressed(btn)
     if btn.state == :on
-      file = get_bank_file_for_dragon(btn.suit, true)
+      file = get_bank_file_for_dragon(btn.suit)
       cards_in_play(true).find_all { |card| card.suit == btn.suit && card.value == 0 }.each do |card|
         #@type [Card]
         card = card
@@ -523,12 +523,11 @@ class Game
   end
 
   # @return [Array<Card>]
-  def cards_in_bank(exclude_gathered_dragons = true)
+  def cards_in_bank
     stable_state.cards.find_all { |card|
       (card.rank == -1) &&
           (card.file < 3) &&
-          (not (stable_state.held_cards || []).include? card) &&
-          ((card.suit != :misc) || not(exclude_gathered_dragons))
+          (not ((stable_state.held_cards || []).include? card))
     }.sort_by { |card| card.file }
   end
 
@@ -603,20 +602,9 @@ class Game
 
   # @return [Integer, nil]
   def get_bank_file_for_dragon(suit)
-    #@type Array<Card>
-    bank_cards = cards_in_bank(gathering_dragons)
-    if bank_cards.length == 3
-      tmp = bank_cards.find { |card| (card.suit == suit && card.value == 0) }
-      if tmp != nil
-        return tmp.file
-      else
-        return nil
-      end
-    elsif bank_cards.length == 0
-      return 0
-    else
-      (0..2).find { |file| cards_in_bank(false).find { |card| card.file != file } }
-    end
+    bank = cards_in_bank
+    clog bank.to_s
+    (0..2).to_a.find { |file| (nil == bank.find { |card| card.file == file }) || (nil == bank.find { |card| card.file == file && not(card.value == 0 && card.suit == suit) }) }
   end
 
   def light_buttons
