@@ -3,7 +3,7 @@ FLOWER_POWER = false # Every card can be dropped into the flower card slot. If y
 SHUFFLE = true # Shuffle the deck. You can't win if you don't shuffle. Used to debug dragon buttons.
 ONLY_DRAGONS = false # Skip numbered cards
 TRACE_ENABLED = false # Enable tracing. SUPER SLOW!
-PRODUCTION = true # Enable production mode
+PRODUCTION = false # Enable production mode
 MIN_LOG_LEVEL = :warn # Minimum log level for clog. Trace *kills* framerate if running on HDD.
 
 COLORS = {
@@ -312,7 +312,8 @@ end
 
 #noinspection RubyResolve
 class StableState
-  attr_accessor :holding_cards, :mouse_down_pos, :entities, :buttons, :cards, :held_cards, :gtk_state, :last_mouse_bits, :auto_move_cooldown
+  attr_accessor :holding_cards, :mouse_down_pos, :entities, :buttons, :cards, :held_cards, :gtk_state,
+                :last_mouse_bits, :auto_move_cooldown, :sprites, :paused, :screen_dirty
 
   # @param [OpenEntity] gtk_state The actual state of the game engine
   def initialize(gtk_state)
@@ -357,6 +358,7 @@ class StableState
                       })
       clog("#{card.suit.to_s}_#{card.value.to_s} at rank #{card.rank} and file #{card.file}", :trace, __LINE__)
       card.set_pos(card.calculate_snap_position)
+      @screen_dirty = true
       @cards << card
     }
     @entities += @cards
@@ -410,8 +412,33 @@ class Game
   # Render everything
   def render
     outputs.background_color = [1, 55, 30]
-    outputs.sprites << [0, 0, 1280, 720, "sprites/background.png"]
-    outputs.sprites << stable_state.entities.sort_by { |ent| ent.z }.map { |ent| ent.sprite.list }
+    stable_state.sprites = []
+    stable_state.paused = false
+    outputs.static_sprites.clear
+    stable_state.sprites << [0, 0, 1280, 720, "sprites/background.png"]
+    stable_state.sprites << stable_state.entities.sort_by { |ent| ent.z }.map { |ent| ent.sprite.list }
+    outputs.sprites << stable_state.sprites
+  end
+  # Just re-render the last frame. Reduces idle CPU usage.
+  def render_paused
+    outputs.background_color = [1, 55, 30]
+    unless stable_state.paused
+      outputs.static_sprites << stable_state.sprites
+      stable_state.paused = true
+    end
+  end
+
+  # @param [Card] card
+  # @param [nil, Integer] rank
+  # @param [nil, Integer] file
+  # @param [nil, Integer] value
+  # @param [nil, Symbol] suit
+  def alter_card(card, rank = nil, file = nil, value = nil, suit = nil)
+    card.rank = rank if rank
+    card.file = file if file
+    card.suit = suit if suit
+    card.value= value if value
+    card.set_pos(card.calculate_snap_position)
   end
 
   # Determine the entity the user clicked on
@@ -461,13 +488,7 @@ class Game
     if btn.state == :on
       file = get_bank_file_for_dragon(btn.suit)
       cards_in_play(true).find_all { |card| card.suit == btn.suit && card.value == 0 }.each do |card|
-        #@type [Card]
-        card = card
-        card.rank = -1
-        card.file = file
-        card.suit = :misc
-        card.value = 1
-        card.set_pos(card.calculate_snap_position)
+        alter_card(card, -1, file, 1, :misc)
       end
       btn.state = :off
       btn.update_sprite_img
@@ -498,40 +519,39 @@ class Game
     return nil unless (cards_on_top + stable_state.cards.find_all {|c| c.rank == -1 && c.file < 3}).include? card
     discarded_cards = stable_state.cards.find_all {|c| c.rank == -1 && c.file > 4}
     discard_pile_top_card = discarded_cards.find {|c| c.suit == card.suit && c.value+1 == card.value}
-    moved = false
+    new_rank = nil
+    new_file = nil
     if FLOWER_POWER || (card.suit == :misc && card.value == 0)
-      card.rank = -1
-      card.file = 4
-      moved = true
+      new_rank = -1
+      new_file = 4
     elsif discard_pile_top_card
       if ((cards_in_play(true )-[card]-discarded_cards).count {|c| c.suit != card.suit && c.suit!=:misc && (c.value+1) == card.value}) == 0
-        card.rank = -1
-        card.file = discard_pile_top_card.file
-        moved = true
+        new_rank = -1
+        new_file = discard_pile_top_card.file
       end
     elsif card.suit != :misc && card.value == 1
-      card.rank = -1
-      card.file = (5..7).find {|f| discarded_cards.none?{|c| c.file == f}}
-      moved = true
+      new_rank = -1
+      new_file = (5..7).find {|f| discarded_cards.none?{|c| c.file == f}}
     end
-    if moved
-      card.set_pos(card.calculate_snap_position)
+    if new_rank || new_file
+      alter_card(card, new_rank, new_file)
       stable_state.auto_move_cooldown = 5
     end
-    moved
+    !!(new_rank || new_file)
   end
 
   def auto_move_cards
     stable_state.auto_move_cooldown -= 1 if stable_state.auto_move_cooldown > 0
-    return nil if stable_state.holding_cards || (stable_state.auto_move_cooldown != 0)
+    return false if stable_state.holding_cards || (stable_state.auto_move_cooldown != 0)
     q = cards_on_top + stable_state.cards.find_all {|c| c.rank == -1 && c.file < 3}
     c = q.shift
     while c
-      return if auto_move_card(c)
+      return true if auto_move_card(c)
       c = q.shift
     end
     dim_buttons
     light_buttons
+    false
   end
 
   # Update the positions of the held cards so they follow the mouse
@@ -632,12 +652,10 @@ class Game
       end
       idx = 0
       held_cards.each do |held_card|
-        # @type [Card]
-        card = held_card
-        card.rank = base_rf[:rank] + idx
+        new_rank = base_rf[:rank] + idx
         idx += 1
-        card.file = base_rf[:file]
-        card.set_pos(card.calculate_snap_position)
+        new_file = base_rf[:file]
+        alter_card(held_card, new_rank, new_file)
       end
     else
       clog("UNEXPECTED STATE: Somehow, the player has grabbed zero cards.", :err, __LINE__)
@@ -704,32 +722,40 @@ class Game
 
   # See what the user is doing, and react accordingly
   def process_input
+    input_detected = true
     if mouse_down_list.include? :lmb
       profile('process_mouse_down') {process_mouse_down}
-      stable_state.auto_move_cooldown = 10
     elsif stable_state.holding_cards && mouse_held_list.include?(:lmb)
       profile('drop_cards') {drag_cards}
-      stable_state.auto_move_cooldown = 10
     elsif stable_state.holding_cards && mouse_up_list.include?(:lmb)
       profile('drop_cards') {drop_cards}
       profile('dim_buttons') {dim_buttons}
       profile('light_buttons') {light_buttons}
-      stable_state.auto_move_cooldown = 10
-    end
-    if inputs.keyboard.key_down.space
+    elsif inputs.keyboard.key_down.space
       # Reset the game
-      # $gtk.reset(seed: (Time.now.to_f * 100000).to_i)
+      stable_state.screen_dirty = true
       new_game
+    else
+      input_detected = false
     end
+    stable_state.auto_move_cooldown = 10
+    input_detected
   end
 
   # @param [$gtk.args] args
   def tick(args)
     @args = args
-    auto_move_cards
-    profile('process_input') { process_input }
-    #profile('render') {render}
-    render
+    old_dirty = stable_state.screen_dirty || stable_state.auto_move_cooldown != 0
+    stable_state.screen_dirty = false
+    if inputs.keyboard.has_focus
+      stable_state.screen_dirty |= auto_move_cards if old_dirty
+      profile('process_input') { stable_state.screen_dirty |= process_input }
+    end
+    if stable_state.screen_dirty || (Kernel::global_tick_count == 0)
+      render
+    else
+      render_paused
+    end
     stable_state.last_mouse_bits=inputs.mouse.button_bits
   end
 end
@@ -746,7 +772,7 @@ def tick(args)
   if Kernel::global_tick_count == 0
     $game = Game.new args
     if PRODUCTION
-      args.gtk.log_level = :warn
+      args.gtk.log_level = :on
       $gtk.define_singleton_method(:production) { true } #shhhhhhh
     end
   end
