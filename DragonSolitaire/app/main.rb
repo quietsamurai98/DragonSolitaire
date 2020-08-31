@@ -734,7 +734,9 @@ end
 if Kernel::global_tick_count == 0
   $game = nil
 end
-
+if PRODUCTION
+  $gtk.define_singleton_method(:production) { true } #shhhhhhh
+end
 #noinspection RubyResolve,RubyNilAnalysis
 def tick(args)
   GTK::Trace.flush_trace(true) if Kernel.global_tick_count % 600 == 0
