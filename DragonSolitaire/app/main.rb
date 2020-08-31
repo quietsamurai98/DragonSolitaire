@@ -738,7 +738,7 @@ class Game
     else
       input_detected = false
     end
-    stable_state.auto_move_cooldown = 10
+    stable_state.auto_move_cooldown = 10 if input_detected
     input_detected
   end
 
