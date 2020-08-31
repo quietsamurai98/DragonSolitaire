@@ -1,10 +1,10 @@
 # Constants used for debugging
-$FLOWER_POWER = true # Every card can be dropped into the flower card slot. If you're looking for a cheat code, here it is.
-SHUFFLE = false # Shuffle the deck. You can't win if you don't shuffle. Used to debug dragon buttons.
-ONLY_DRAGONS = true # Skip numbered cards
-TRACE_ENABLED = true # Enable tracing. SUPER SLOW!
-PRODUCTION = false # Enable production mode
-MIN_LOG_LEVEL = :info # Minimum log level for clog. Trace *kills* framerate if running on HDD.
+FLOWER_POWER = false # Every card can be dropped into the flower card slot. If you're looking for a cheat code, here it is.
+SHUFFLE = true # Shuffle the deck. You can't win if you don't shuffle. Used to debug dragon buttons.
+ONLY_DRAGONS = false # Skip numbered cards
+TRACE_ENABLED = false # Enable tracing. SUPER SLOW!
+PRODUCTION = true # Enable production mode
+MIN_LOG_LEVEL = :warn # Minimum log level for clog. Trace *kills* framerate if running on HDD.
 
 COLORS = {
     red: {r: 217, g: 95, b: 2},
@@ -15,25 +15,33 @@ COLORS = {
 
 LOG_LEVELS = {
     trace: {str: "[TRACE] ", level: 0},
-    debug: {str: "[DEBUG] ", level: 1},
-    info: {str: "[INFO]  ", level: 2},
-    warn: {str: "[WARN]  ", level: 3},
-    err: {str: "[ERROR] ", level: 4},
-    fatal: {str: "[FATAL] ", level: 5},
+    prof: {str: "[PROF]  ", level: 1},
+    debug: {str: "[DEBUG] ", level: 2},
+    info: {str: "[INFO]  ", level: 3},
+    warn: {str: "[WARN]  ", level: 4},
+    err: {str: "[ERROR] ", level: 5},
+    fatal: {str: "[FATAL] ", level: 6},
 }
 
 # @param [String, #to_s] msg The message to log
 # @param [Symbol, nil] level The level at which to log msg
 # @param [#to_s] line Just pass in `__LINE__`.
-# @return [Time, Float] Amount of time it took to log the message
 def clog(msg, level = nil, line = '???')
+    level ||= :info
+    level = LOG_LEVELS[level]
+    if LOG_LEVELS[MIN_LOG_LEVEL][:level] <= level[:level]
+      puts "#{level[:str]}[L\##{line}]  #{msg}"
+    end
+end
+
+def profile(method_name="anonymous", &code)
   start_time = Time.now
-  level ||= :info
-  level = LOG_LEVELS[level]
-  if LOG_LEVELS[MIN_LOG_LEVEL][:level] <= level[:level]
-    puts "#{level[:str]}[L\##{line}]  #{msg}"
+  out = code.call
+  t = Time.now - start_time
+  if t.to_f.round(3) > 0.001
+    clog("`#{method_name}` took #{t.to_f.round(3).to_s} seconds", :prof, __LINE__)
   end
-  Time.now - start_time
+  out
 end
 
 # Name is misleading. Only allows a foreground colored mask sprite and a background sprite.
@@ -65,12 +73,12 @@ class AbstractMultiSprite
 end
 
 class ButtonMultiSprite < AbstractMultiSprite
-
   def initialize(params = {})
     @x = params[:x] || 0
     @y = params[:y] || 0
     @w = 48
     @h = 48
+    @a = 255
     @path = nil
     @background = {x: x, y: y, w: @w, h: @h, path: "sprites/button_bg_dim.png"}
   end
@@ -79,6 +87,12 @@ class ButtonMultiSprite < AbstractMultiSprite
     @path = "sprites/button_icon_#{suit.to_s}.png"
     @background[:path] = "sprites/button_bg_#{state.to_s}.png"
     set_color(COLORS[suit])
+    if state == :off
+      @r *= 0.5
+      @g *= 0.5
+      @b *= 0.5
+      @a = 128
+    end
   end
 
   def set_color(color)
@@ -298,14 +312,15 @@ end
 
 #noinspection RubyResolve
 class StableState
-  attr_accessor :holding_cards, :mouse_down_pos, :entities, :buttons, :cards, :held_cards, :gtk_state, :auto_move_cooldown
+  attr_accessor :holding_cards, :mouse_down_pos, :entities, :buttons, :cards, :held_cards, :gtk_state, :last_mouse_bits, :auto_move_cooldown
 
   # @param [OpenEntity] gtk_state The actual state of the game engine
   def initialize(gtk_state)
     if TRACE_ENABLED
       trace!
     end
-    @auto_move_cooldown = 0
+    @last_mouse_bits = 0
+    @auto_move_cooldown = 20
     @get_state = gtk_state
     $gtk.set_window_title "Dragon Solitaire"
     #@type Boolean
@@ -400,7 +415,7 @@ class Game
   def get_clicked_entity
     stable_state.entities
         .sort_by { |ent| -ent.z }
-        .find { |ent| ent.contains_point(inputs.mouse.down.x, inputs.mouse.down.y) }
+        .find { |ent| ent.contains_point(inputs.mouse.x, inputs.mouse.y) }
   end
 
   # Lists the cards that should be picked up along with a base card
@@ -419,7 +434,6 @@ class Game
     grabbed_cards = [base_card] + cards.find_all { |card| card.file == base_card.file && card.rank > base_card.rank }.sort_by { |card| card.rank }
     valid = true
     (0..grabbed_cards.length - 2).each { |idx|
-      clog("#{grabbed_cards[idx].suit.to_s[0]}#{grabbed_cards[idx].value}", :debug, __LINE__)
       valid &= ((grabbed_cards[idx].value == (grabbed_cards[idx + 1].value + 1)) && (grabbed_cards[idx].suit != grabbed_cards[idx + 1].suit))
     }
     unless valid
@@ -432,7 +446,7 @@ class Game
   def grab_cards(base_card)
     grab_list = list_cards_to_grab(base_card)
     if grab_list.length != 0
-      stable_state.mouse_down_pos = {x: inputs.mouse.down.x, y: inputs.mouse.down.y}
+      stable_state.mouse_down_pos = {x: inputs.mouse.x, y: inputs.mouse.y}
       stable_state.held_cards = grab_list
       stable_state.held_cards.each { |held_card| held_card.z += tick_count }
       stable_state.holding_cards = true
@@ -452,6 +466,8 @@ class Game
         card.value = 1
         card.set_pos(card.calculate_snap_position)
       end
+      btn.state = :off
+      btn.update_sprite_img
       dim_buttons
       light_buttons
     end
@@ -466,12 +482,53 @@ class Game
       if stable_state.cards.include?(clicked_ent)
         clog("CLICKED CARD #{clicked_ent.suit.to_s}_#{clicked_ent.value.to_s}", :trace, __LINE__)
         dim_buttons
-        grab_cards(clicked_ent)
+        profile('grab_cards') {grab_cards(clicked_ent)}
       elsif stable_state.buttons.include?(clicked_ent)
         clog("CLICKED #{clicked_ent.suit.to_s} BUTTON", :trace, __LINE__)
         dragon_button_pressed(clicked_ent)
       end
     end
+  end
+
+  # @param [Card] card card
+  def auto_move_card(card)
+    return nil unless (cards_on_top + stable_state.cards.find_all {|c| c.rank == -1 && c.file < 3}).include? card
+    discarded_cards = stable_state.cards.find_all {|c| c.rank == -1 && c.file > 4}
+    discard_pile_top_card = discarded_cards.find {|c| c.suit == card.suit && c.value+1 == card.value}
+    moved = false
+    if FLOWER_POWER || (card.suit == :misc && card.value == 0)
+      card.rank = -1
+      card.file = 4
+      moved = true
+    elsif discard_pile_top_card
+      if ((cards_in_play(true )-[card]-discarded_cards).count {|c| c.suit != card.suit && c.suit!=:misc && (c.value+1) == card.value}) == 0
+        card.rank = -1
+        card.file = discard_pile_top_card.file
+        moved = true
+      end
+    elsif card.suit != :misc && card.value == 1
+      card.rank = -1
+      card.file = (5..7).find {|f| discarded_cards.none?{|c| c.file == f}}
+      moved = true
+    end
+    if moved
+      card.set_pos(card.calculate_snap_position)
+      stable_state.auto_move_cooldown = 5
+    end
+    moved
+  end
+
+  def auto_move_cards
+    stable_state.auto_move_cooldown -= 1 if stable_state.auto_move_cooldown > 0
+    return nil if stable_state.holding_cards || (stable_state.auto_move_cooldown != 0)
+    q = cards_on_top + stable_state.cards.find_all {|c| c.rank == -1 && c.file < 3}
+    c = q.shift
+    while c
+      return if auto_move_card(c)
+      c = q.shift
+    end
+    dim_buttons
+    light_buttons
   end
 
   # Update the positions of the held cards so they follow the mouse
@@ -534,9 +591,7 @@ class Game
   # Drops the currently held cards
   # Abandon hope, all ye who debug here
   def drop_cards
-    start_time = Time.now
-    skip_dur = 0
-
+    
     droppable = false
     #@type Array<Card>
     held_cards = stable_state.held_cards
@@ -549,7 +604,7 @@ class Game
         if file < 3 # Bank spaces
           droppable = not(cards_in_file(file).any? { |card| card.rank == -1 })
         elsif file == 4 # Flower space
-          droppable = $FLOWER_POWER || (base_card.suit == :misc && base_card.value == 0) # Only one flower, no need to check if occupied
+          droppable = FLOWER_POWER || (base_card.suit == :misc && base_card.value == 0) # Only one flower, no need to check if occupied
         elsif file > 4 # Discard space
           card = cards_in_file(file).find_all { |card| card.rank == -1 }.sort_by { |card| card.value }[-1]
           droppable = card == nil ? base_card.value == 1 : ((base_card.value == (card.value + 1)) && (base_card.suit == card.suit))
@@ -586,10 +641,6 @@ class Game
     end
     stable_state.held_cards = []
     stable_state.holding_cards = false
-
-    end_time = Time.now
-    clog("Card dropping took #{end_time - start_time - skip_dur} seconds!", :debug, __LINE__)
-    clog("Logging took #{skip_dur} seconds!", :debug, __LINE__)
   end
 
   def dim_buttons
@@ -603,44 +654,64 @@ class Game
   # @return [Integer, nil]
   def get_bank_file_for_dragon(suit)
     bank = cards_in_bank
-    clog bank.to_s
     (0..2).to_a.find { |file| (nil == bank.find { |card| card.file == file }) || (nil == bank.find { |card| card.file == file && not(card.value == 0 && card.suit == suit) }) }
   end
 
   def light_buttons
-    start_time = Time.now
-    skip_dur = 0
+    
     stable_state.buttons.find_all do |button|
-      skip_dur += clog("Testing #{button.suit} button...", :trace, __LINE__)
+      clog("Testing #{button.suit} button...", :trace, __LINE__)
       #@type Button
       btn = button
       dim_test = btn.state != :off
-      skip_dur += clog("dim_test: #{dim_test}", :trace, __LINE__)
+      clog("dim_test: #{dim_test}", :trace, __LINE__)
       bank_test = (dim_test && (get_bank_file_for_dragon(btn.suit) != nil))
-      skip_dur += clog("bank_test: #{bank_test}", :trace, __LINE__)
+      clog("bank_test: #{bank_test}", :trace, __LINE__)
       access_test = (bank_test && (4 == (cards_in_bank + cards_on_top).count { |card| ((card.suit == btn.suit) && (card.value == 0)) }))
-      skip_dur += clog("access_test: #{access_test}", :trace, __LINE__)
+      clog("access_test: #{access_test}", :trace, __LINE__)
       access_test
     end.each do |button|
       button.state = :on
-      skip_dur += clog("Lighting #{button.suit} button", :trace, __LINE__)
+      clog("Lighting #{button.suit} button", :trace, __LINE__)
     end
-    end_time = Time.now
-    clog("Button lighting took #{end_time - start_time - skip_dur} seconds!", :debug, __LINE__)
-    clog("Logging took #{skip_dur} seconds!", :debug, __LINE__)
     nil
+  end
+
+  def mouse_mask_to_list(mask)
+    out = []
+    out << :lmb if inputs.mouse.click || (mask & 1) != 0
+    out << :mmb if (mask & 2) != 0
+    out << :rmb if (mask & 4) != 0
+    out << :mouse5 if (mask & 8) != 0
+    out << :mouse4 if (mask & 16) != 0
+    out
+  end
+  def mouse_down_list
+    mouse_mask_to_list ~stable_state.last_mouse_bits & inputs.mouse.button_bits
+  end
+  def mouse_up_list
+    mouse_mask_to_list stable_state.last_mouse_bits & ~inputs.mouse.button_bits
+  end
+  def mouse_held_list
+    mouse_mask_to_list stable_state.last_mouse_bits & inputs.mouse.button_bits
+  end
+  def mouse_unheld_list
+    mouse_mask_to_list ~(stable_state.last_mouse_bits & inputs.mouse.button_bits)
   end
 
   # See what the user is doing, and react accordingly
   def process_input
-    if inputs.mouse.down
-      process_mouse_down
-    elsif stable_state.holding_cards && inputs.mouse.button_left
-      drag_cards
-    elsif stable_state.holding_cards && inputs.mouse.up
-      drop_cards
-      dim_buttons
-      light_buttons
+    if mouse_down_list.include? :lmb
+      profile('process_mouse_down') {process_mouse_down}
+      stable_state.auto_move_cooldown = 10
+    elsif stable_state.holding_cards && mouse_held_list.include?(:lmb)
+      profile('drop_cards') {drag_cards}
+      stable_state.auto_move_cooldown = 10
+    elsif stable_state.holding_cards && mouse_up_list.include?(:lmb)
+      profile('drop_cards') {drop_cards}
+      profile('dim_buttons') {dim_buttons}
+      profile('light_buttons') {light_buttons}
+      stable_state.auto_move_cooldown = 10
     end
     if inputs.keyboard.key_down.space
       # Reset the game
@@ -652,8 +723,11 @@ class Game
   # @param [$gtk.args] args
   def tick(args)
     @args = args
-    process_input
+    auto_move_cards
+    profile('process_input') { process_input }
+    #profile('render') {render}
     render
+    stable_state.last_mouse_bits=inputs.mouse.button_bits
   end
 end
 
