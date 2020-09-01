@@ -1,4 +1,4 @@
-require 'mocks/dragon/index.rb'
+# require 'mocks/dragon/index.rb'
 
 $gtk ||= OpenStruct
 
@@ -6,8 +6,8 @@ $gtk ||= OpenStruct
 FLOWER_POWER = false # Every card can be dropped into the flower card slot. If you're looking for a cheat code, here it is.
 SHUFFLE = true # Shuffle the deck. You can't win if you don't shuffle. Used to debug dragon buttons.
 ONLY_DRAGONS = false # Skip numbered cards
-TRACE_ENABLED = false # Enable tracing. SUPER SLOW!
-PRODUCTION = true # Enable production mode
+TRACE_ENABLED = true # Enable tracing. SUPER SLOW!
+PRODUCTION = false # Enable production mode
 MIN_LOG_LEVEL = :warn # Minimum log level for clog. Trace *kills* framerate if running on HDD.
 
 COLORS = {
@@ -49,7 +49,7 @@ def profile(method_name = "anonymous", &code)
 end
 
 # Name is misleading. Only allows a foreground colored mask sprite and a background sprite.
-class AbstractMultiSprite
+module AbstractMultiSprite
   attr_accessor :background
   include AttrSprite
 
@@ -76,7 +76,8 @@ class AbstractMultiSprite
 end
 
 #noinspection RubyTooManyInstanceVariablesInspection
-class ButtonMultiSprite < AbstractMultiSprite
+class ButtonMultiSprite
+  include AbstractMultiSprite
   def initialize(params = {})
     @x = params[:x] || 0
     @y = params[:y] || 0
@@ -97,22 +98,6 @@ class ButtonMultiSprite < AbstractMultiSprite
       @b *= 0.5
       @a = 128
     end
-  end
-
-  def set_color(color)
-    super
-  end
-
-  def set_pos(params = nil)
-    super
-  end
-
-  def list
-    super
-  end
-
-  def center
-    super
   end
 
 end
@@ -179,6 +164,7 @@ end
 class CardMultiSprite
   attr_accessor :background
   include AttrSprite
+  include AbstractMultiSprite
 
   def initialize(params = {})
     @x = params[:x] || 0
@@ -187,12 +173,6 @@ class CardMultiSprite
     @h = 180
     @path = nil
     @background = {x: x, y: y, w: @w, h: @h, path: "sprites/card_bg.png"}
-  end
-
-  def set_color(color)
-    @r = color[:r]
-    @g = color[:g]
-    @b = color[:b]
   end
 
   def set_img(suit, value)
@@ -215,20 +195,6 @@ class CardMultiSprite
     end
   end
 
-  def set_pos(params = {})
-    @x = params[:x] || @x
-    @background.x = params[:x] || @x
-    @y = params[:y] || @y
-    @background.y = params[:y] || @y
-  end
-
-  def list
-    [@background, self]
-  end
-
-  def center
-    {x: @x + (@w / 2), y: @y + (@h / 2)}
-  end
 end
 class Card
   attr_accessor :suit, :value, :x, :y, :z, :id, :rank, :file
