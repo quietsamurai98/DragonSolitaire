@@ -1,13 +1,9 @@
-# require 'mocks/dragon/index.rb'
-
-$gtk ||= OpenStruct
-
 # Constants used for debugging
 FLOWER_POWER = false # Every card can be dropped into the flower card slot. If you're looking for a cheat code, here it is.
 SHUFFLE = true # Shuffle the deck. You can't win if you don't shuffle. Used to debug dragon buttons.
 ONLY_DRAGONS = false # Skip numbered cards
-TRACE_ENABLED = true # Enable tracing. SUPER SLOW!
-PRODUCTION = false # Enable production mode
+TRACE_ENABLED = false # Enable tracing. SUPER SLOW!
+PRODUCTION = true # Enable production mode
 MIN_LOG_LEVEL = :warn # Minimum log level for clog. Trace *kills* framerate if running on HDD.
 
 COLORS = {
@@ -49,25 +45,47 @@ def profile(method_name = "anonymous", &code)
 end
 
 # Name is misleading. Only allows a foreground colored mask sprite and a background sprite.
-module AbstractMultiSprite
-  attr_accessor :background
-  include AttrSprite
+#noinspection RubyTooManyInstanceVariablesInspection
+class AbstractMultiSprite
+  attr_accessor :background, :foreground, :x, :y, :w, :h
+
+  @@next_id = 0
+
+  def initialize(params = {})
+    @x = params[:x] || 0
+    @y = params[:y] || 0
+    @w = params[:w] || 32
+    @h = params[:h] || 32
+    @id = @@next_id += 1
+  end
+
+  # @param [AttrGTK] args
+  def redraw(args = nil)
+    args ||= $gtk.args
+    tgt = args.render_target(render_tgt_sym)
+    tgt.width = @w
+    tgt.height = @h
+    tgt.sprites << [background, foreground]
+  end
+
+  def multisprite
+    {x:@x, y:@y, h:@h, w:@w, path:render_tgt_sym}
+  end
+
+  def render_tgt_sym
+    ("AbstractMultiClass_RenderTarget_"+@id.to_s).to_sym
+  end
 
   def set_color(color)
-    @r = color[:r]
-    @g = color[:g]
-    @b = color[:b]
+    @foreground[:r] = color[:r]
+    @foreground[:g] = color[:g]
+    @foreground[:b] = color[:b]
+    redraw
   end
 
   def set_pos(params = {})
     @x = params[:x] || @x
-    @background.x = params[:x] || @x
     @y = params[:y] || @y
-    @background.y = params[:y] || @y
-  end
-
-  def list
-    [@background, self]
   end
 
   def center
@@ -76,31 +94,32 @@ module AbstractMultiSprite
 end
 
 #noinspection RubyTooManyInstanceVariablesInspection
-class ButtonMultiSprite
-  include AbstractMultiSprite
+class ButtonMultiSprite < AbstractMultiSprite
   def initialize(params = {})
-    @x = params[:x] || 0
-    @y = params[:y] || 0
+    super params
     @w = 48
     @h = 48
-    @a = 255
-    @path = nil
-    @background = {x: x, y: y, w: @w, h: @h, path: "sprites/button_bg_dim.png"}
+    @foreground = {x: 0, y: 0, w: @w, h: @h, r:255, g:255, b:255, a:255, path: "sprites/button_bg_dim.png"}
+    @foreground[:a] = 255
+    @state = :dim
+    @background = {x: 0, y: 0, w: @w, h: @h, path: "sprites/button_bg_dim.png"}
+    redraw params[:args]
   end
 
   def set_img(suit, state)
-    @path = "sprites/button_icon_#{suit.to_s}.png"
+    @foreground[:path] = "sprites/button_icon_#{suit.to_s}.png"
     @background[:path] = "sprites/button_bg_#{state.to_s}.png"
     set_color(COLORS[suit])
     if state == :off
-      @r *= 0.5
-      @g *= 0.5
-      @b *= 0.5
-      @a = 128
+      @foreground[:r] *= 0.5
+      @foreground[:g] *= 0.5
+      @foreground[:b] *= 0.5
+      @foreground[:a] = 128
     end
   end
 
 end
+
 class Button
   attr_accessor :suit, :state, :x, :y, :z, :id
 
@@ -133,7 +152,7 @@ class Button
     @y = params[:y] || 0
     @z = params[:z] || 0 #Z Layer - Lower layers are covered by higher layers
     @id = params[:id] || 0
-    @sprite = ButtonMultiSprite.new
+    @sprite = ButtonMultiSprite.new params
   end
 
   # @param [Hash] params
@@ -161,18 +180,16 @@ class Button
     dist_sq < r_sq
   end
 end
-class CardMultiSprite
-  attr_accessor :background
-  include AttrSprite
-  include AbstractMultiSprite
+
+class CardMultiSprite < AbstractMultiSprite
 
   def initialize(params = {})
-    @x = params[:x] || 0
-    @y = params[:y] || 0
+    super params
     @w = 128
     @h = 180
-    @path = nil
-    @background = {x: x, y: y, w: @w, h: @h, path: "sprites/card_bg.png"}
+    @background = {x: 0, y: 0, w: w, h: h, path: "sprites/card_bg.png"}
+    @foreground = {x: 0, y: 0, w: @w, h: @h, r:255, g:255, b:255, a:255, path: "sprites/card_flower.png"}
+    redraw
   end
 
   def set_img(suit, value)
@@ -180,22 +197,23 @@ class CardMultiSprite
       #Card has a special sprite
       if suit == :misc && value == 0
         set_color(COLORS[:white])
-        @path = "sprites/card_flower.png"
+        @foreground[:path] = "sprites/card_flower.png"
       elsif suit == :misc && value == 1
         set_color(COLORS[:white])
-        @path = "sprites/card_back.png"
+        @foreground[:path] = "sprites/card_back.png"
       elsif suit != :misc
         set_color(COLORS[suit])
-        @path = "sprites/card_dragon_#{suit.to_s}.png"
+        @foreground[:path] = "sprites/card_dragon_#{suit.to_s}.png"
       end
     else
       #Card has a numbered sprite
-      @path = "sprites/card_#{value.to_s}.png"
+      @foreground[:path] = "sprites/card_#{value.to_s}.png"
       set_color(COLORS[suit])
     end
   end
 
 end
+
 class Card
   attr_accessor :suit, :value, :x, :y, :z, :id, :rank, :file
 
@@ -273,6 +291,7 @@ class Card
     {x: x, y: y, z: z}
   end
 end
+
 class StableState
   attr_accessor :holding_cards,
                 :mouse_down_pos,
@@ -282,14 +301,15 @@ class StableState
                 :held_cards,
                 :gtk_state,
                 :last_mouse_bits,
-                :auto_move_cooldown
+                :auto_move_cooldown,
+                :dirty_frames
 
-  # @param [OpenEntity] gtk_state The actual state of the game engine
-  def initialize(gtk_state)
+  def initialize(gtk_state, args)
     if TRACE_ENABLED
       trace!
     end
     @last_mouse_bits = 0
+    @dirty_frames = 0
     @auto_move_cooldown = 20
     @get_state = gtk_state
     $gtk.set_window_title "Dragon Solitaire"
@@ -303,9 +323,9 @@ class StableState
     @entities = []
     #@type Array<Button>
     @buttons = [
-        Button.new({suit: :red, state: :dim, x: 536, y: 647}),
-        Button.new({suit: :green, state: :dim, x: 536, y: 590}),
-        Button.new({suit: :blue, state: :dim, x: 536, y: 533})
+        Button.new({suit: :red, state: :dim, x: 536, y: 647, args: args}),
+        Button.new({suit: :green, state: :dim, x: 536, y: 590, args: args}),
+        Button.new({suit: :blue, state: :dim, x: 536, y: 533, args: args})
     ]
     @entities += @buttons
     @cards = []
@@ -323,7 +343,8 @@ class StableState
                           file: (idx % 8),
                           rank: (idx / 8).to_i,
                           z: idx,
-                          id: idx
+                          id: idx,
+                          args: args
                       })
       clog("#{card.suit.to_s}_#{card.value.to_s} at rank #{card.rank} and file #{card.file}", :trace, __LINE__)
       card.set_pos(card.calculate_snap_position)
@@ -369,7 +390,8 @@ class Game
   end
 
   def new_game
-    self.stable_state = StableState.new(@args)
+    @dirty = true
+    self.stable_state = StableState.new(state, @args)
     light_buttons
   end
 
@@ -380,8 +402,17 @@ class Game
   # Render everything
   def render
     outputs.background_color = [1, 55, 30]
-    outputs.sprites << [0, 0, 1280, 720, "sprites/background.png"]
-    outputs.sprites << stable_state.entities.sort_by { |ent| ent.z }.map { |ent| ent.sprite.list }
+    if @show_fps
+      outputs.labels << [10, 30, args.gtk.current_framerate.to_i]
+      outputs.labels << [1250, 30, stable_state.dirty_frames.to_i]
+    end
+    if @dirty
+      stable_state.dirty_frames+=1
+      outputs.static_sprites.clear
+      outputs.static_sprites << [0, 0, 1280, 720, "sprites/background.png"]
+      outputs.static_sprites << stable_state.entities.sort_by { |ent| ent.z }.map { |ent| ent.sprite.multisprite }
+      @dirty = false
+    end
   end
 
   # @param [Card] card
@@ -390,10 +421,13 @@ class Game
   # @param [nil, Integer] value
   # @param [nil, Symbol] suit
   def alter_card(card, rank = nil, file = nil, value = nil, suit = nil)
+    @dirty = true
     card.rank = rank if rank
     card.file = file if file
     card.suit = suit if suit
+    card.sprite.redraw args if suit
     card.value = value if value
+    card.sprite.redraw args if value
     card.set_pos(card.calculate_snap_position)
   end
 
@@ -493,7 +527,7 @@ class Game
       alter_card(card, new_rank, new_file)
       stable_state.auto_move_cooldown = 5
     end
-    !!(new_rank || new_file)
+    !!(new_rank || new_file) # Coerce to Boolean
   end
 
   def auto_move_cards
@@ -514,6 +548,7 @@ class Game
   def drag_cards
     dx = inputs.mouse.x - stable_state.mouse_down_pos[:x]
     dy = inputs.mouse.y - stable_state.mouse_down_pos[:y]
+    @dirty = true
     stable_state.held_cards.each do |held_card|
       pos = held_card.calculate_snap_position
       held_card.set_pos({x: pos[:x] + dx, y: pos[:y] + dy})
@@ -623,6 +658,7 @@ class Game
   def dim_buttons
     stable_state.buttons.each { |btn|
       if btn.state == :on
+        @dirty = true
         btn.state = :dim
       end
     }
@@ -648,6 +684,7 @@ class Game
       clog("access_test: #{access_test}", :trace, __LINE__)
       access_test
     end.each do |button|
+      @dirty = true
       button.state = :on
       clog("Lighting #{button.suit} button", :trace, __LINE__)
     end
@@ -694,10 +731,15 @@ class Game
       profile('light_buttons') { light_buttons }
       stable_state.auto_move_cooldown = 10
     end
-    if inputs.keyboard.key_down.space
+    if inputs.keyboard.key_held.space
       # Reset the game
       # $gtk.reset(seed: (Time.now.to_f * 100000).to_i)
       new_game
+    end
+    if inputs.keyboard.key_down.f
+      # Reset the game
+      # $gtk.reset(seed: (Time.now.to_f * 100000).to_i)
+      @show_fps = not(@show_fps||false)
     end
   end
 
@@ -725,6 +767,7 @@ end
 def tick(args)
   GTK::Trace.flush_trace(true) if Kernel.global_tick_count % 600 == 0
   if Kernel::global_tick_count == 0
+    # trace! $gtk
     $game = Game.new args
     if PRODUCTION
       args.gtk.log_level = :warn
